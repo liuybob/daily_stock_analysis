@@ -310,16 +310,27 @@ class StockAnalysisPipeline:
                 logger.warning(f"[{code}] 无法获取分析上下文，跳过分析")
                 return None
             
-            # Step 6: 增强上下文数据（添加实时行情、筹码、趋势分析结果、股票名称）
+            # Step 6: ML模型预测（渐进式集成）
+            ml_prediction = None
+            try:
+                ml_prediction = self._get_ml_prediction(code, context)
+                if ml_prediction:
+                    logger.info(f"[{code}] ML预测: {ml_prediction.get('signal', 'N/A')}, "
+                              f"置信度={ml_prediction.get('confidence', 0):.2f}")
+            except Exception as e:
+                logger.warning(f"[{code}] ML预测失败: {e}")
+
+            # Step 7: 增强上下文数据（添加实时行情、筹码、趋势分析结果、ML预测、股票名称）
             enhanced_context = self._enhance_context(
-                context, 
-                realtime_quote, 
-                chip_data, 
+                context,
+                realtime_quote,
+                chip_data,
                 trend_result,
+                ml_prediction,  # 传入ML预测结果
                 stock_name  # 传入股票名称
             )
-            
-            # Step 7: 调用 AI 分析（传入增强的上下文和新闻）
+
+            # Step 8: 调用 AI 分析（传入增强的上下文和新闻）
             result = self.analyzer.analyze(enhanced_context, news_context=news_context)
             
             return result
@@ -328,27 +339,130 @@ class StockAnalysisPipeline:
             logger.error(f"[{code}] 分析失败: {e}")
             logger.exception(f"[{code}] 详细错误信息:")
             return None
-    
+
+    def _get_ml_prediction(
+        self,
+        code: str,
+        context: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        获取ML模型预测（渐进式集成）
+
+        如果存在训练好的ML模型，使用模型进行预测；
+        如果不存在或预测失败，返回None而不影响主流程。
+
+        Args:
+            code: 股票代码
+            context: 分析上下文
+
+        Returns:
+            ML预测结果字典，或None
+        """
+        try:
+            # 尝试导入ML模块
+            from feature_engineering import FeatureEngineering, FeatureConfig, ScalingMethod
+            from ml_signal_predictor import SignalPredictionModel, ModelType, SignalType
+            from pathlib import Path
+            import pandas as pd
+
+            # 检查模型文件是否存在
+            model_path = Path("models/signal_predictor.pkl")
+            if not model_path.exists():
+                logger.debug(f"[{code}] ML模型文件不存在，跳过ML预测")
+                return None
+
+            # 检查是否有原始数据
+            if 'raw_data' not in context or not context['raw_data']:
+                logger.debug(f"[{code}] 缺少原始数据，跳过ML预测")
+                return None
+
+            # 准备数据
+            df = pd.DataFrame(context['raw_data'])
+
+            # 检查数据是否足够
+            if len(df) < 60:  # 至少需要60天数据
+                logger.debug(f"[{code}] 数据不足（{len(df)}天），跳过ML预测")
+                return None
+
+            # 添加技术指标
+            from data_provider.base import BaseFetcher
+
+            class TempFetcher(BaseFetcher):
+                name = "TempFetcher"
+                priority = 99
+                def _fetch_raw_data(self, stock_code, start_date, end_date):
+                    return pd.DataFrame()
+                def _normalize_data(self, df, stock_code):
+                    return df
+
+            fetcher = TempFetcher()
+            df = fetcher._calculate_indicators(df)
+
+            # 提取特征
+            fe_config = FeatureConfig(scaling_method=ScalingMethod.STANDARD)
+            fe = FeatureEngineering(fe_config)
+            features = fe.extract_features(df, fit_scaler=False)
+
+            # 检查特征数量是否匹配
+            if features.shape[1] < 20:  # 至少需要20个特征
+                logger.debug(f"[{code}] 特征数量不足（{features.shape[1]}），跳过ML预测")
+                return None
+
+            # 加载模型
+            model = SignalPredictionModel.load_model(str(model_path))
+
+            # 预测
+            prediction = model.predict(features.iloc[[-1]])  # 只预测最新一天
+            probability = model.predict_proba(features.iloc[[-1]])[0]
+
+            # 转换为信号
+            signal_map = {1: "BUY", 0: "HOLD", -1: "SELL"}
+            signal = signal_map.get(prediction[0], "HOLD")
+
+            # 计算置信度（最大概率）
+            confidence = float(probability.max())
+
+            return {
+                'signal': signal,
+                'prediction': int(prediction[0]),
+                'confidence': confidence,
+                'probability': {
+                    'BUY': float(probability[2]) if len(probability) > 2 else 0,
+                    'HOLD': float(probability[1]) if len(probability) > 1 else 0,
+                    'SELL': float(probability[0]) if len(probability) > 0 else 0,
+                },
+                'model_type': model.config.model_type.value,
+            }
+
+        except ImportError as e:
+            logger.debug(f"[{code}] ML模块导入失败: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"[{code}] ML预测执行失败: {e}")
+            return None
+
     def _enhance_context(
         self,
         context: Dict[str, Any],
         realtime_quote: Optional[RealtimeQuote],
         chip_data: Optional[ChipDistribution],
         trend_result: Optional[TrendAnalysisResult],
+        ml_prediction: Optional[Dict[str, Any]] = None,
         stock_name: str = ""
     ) -> Dict[str, Any]:
         """
         增强分析上下文
-        
-        将实时行情、筹码分布、趋势分析结果、股票名称添加到上下文中
-        
+
+        将实时行情、筹码分布、趋势分析结果、ML预测、股票名称添加到上下文中
+
         Args:
             context: 原始上下文
             realtime_quote: 实时行情数据
             chip_data: 筹码分布数据
             trend_result: 趋势分析结果
+            ml_prediction: ML模型预测结果
             stock_name: 股票名称
-            
+
         Returns:
             增强后的上下文
         """
@@ -401,7 +515,16 @@ class StockAnalysisPipeline:
                 'signal_reasons': trend_result.signal_reasons,
                 'risk_factors': trend_result.risk_factors,
             }
-        
+
+        # 添加ML预测结果
+        if ml_prediction:
+            enhanced['ml_prediction'] = {
+                'signal': ml_prediction.get('signal', 'N/A'),
+                'confidence': ml_prediction.get('confidence', 0),
+                'probability': ml_prediction.get('probability', {}),
+                'model_type': ml_prediction.get('model_type', 'unknown'),
+            }
+
         return enhanced
     
     def _describe_volume_ratio(self, volume_ratio: float) -> str:
