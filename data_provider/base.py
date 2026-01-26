@@ -188,28 +188,133 @@ class BaseFetcher(ABC):
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         计算技术指标
-        
+
         计算指标：
         - MA5, MA10, MA20: 移动平均线
         - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
+        - RSI: 相对强弱指标
+        - MACD: 平滑异同移动平均线
+        - BOLL: 布林带
+        - ATR: 平均真实波幅
         """
         df = df.copy()
-        
+
         # 移动平均线
         df['ma5'] = df['close'].rolling(window=5, min_periods=1).mean()
         df['ma10'] = df['close'].rolling(window=10, min_periods=1).mean()
         df['ma20'] = df['close'].rolling(window=20, min_periods=1).mean()
-        
+
         # 量比：当日成交量 / 5日平均成交量
         avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
         df['volume_ratio'] = df['volume'] / avg_volume_5.shift(1)
         df['volume_ratio'] = df['volume_ratio'].fillna(1.0)
-        
+
+        # RSI (相对强弱指标)
+        df = self._calculate_rsi(df)
+
+        # MACD (平滑异同移动平均线)
+        df = self._calculate_macd(df)
+
+        # BOLL (布林带)
+        df = self._calculate_boll(df)
+
+        # ATR (平均真实波幅)
+        df = self._calculate_atr(df)
+
         # 保留2位小数
-        for col in ['ma5', 'ma10', 'ma20', 'volume_ratio']:
+        for col in ['ma5', 'ma10', 'ma20', 'volume_ratio', 'rsi', 'dif', 'dea', 'macd',
+                    'boll_upper', 'boll_middle', 'boll_lower', 'atr']:
             if col in df.columns:
                 df[col] = df[col].round(2)
-        
+
+        return df
+
+    def _calculate_rsi(self, df: pd.DataFrame, periods: int = 14) -> pd.DataFrame:
+        """
+        计算RSI指标
+
+        Args:
+            df: 包含close列的DataFrame
+            periods: RSI周期，默认14
+
+        Returns:
+            添加了rsi列的DataFrame
+        """
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+        rs = gain / loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+        df['rsi'] = df['rsi'].fillna(50)  # 默认值
+        return df
+
+    def _calculate_macd(self, df: pd.DataFrame,
+                        fast_period: int = 12,
+                        slow_period: int = 26,
+                        signal_period: int = 9) -> pd.DataFrame:
+        """
+        计算MACD指标
+
+        Args:
+            df: 包含close列的DataFrame
+            fast_period: 快线周期，默认12
+            slow_period: 慢线周期，默认26
+            signal_period: 信号线周期，默认9
+
+        Returns:
+            添加了dif, dea, macd列的DataFrame
+        """
+        exp1 = df['close'].ewm(span=fast_period, adjust=False).mean()
+        exp2 = df['close'].ewm(span=slow_period, adjust=False).mean()
+        df['dif'] = exp1 - exp2
+        df['dea'] = df['dif'].ewm(span=signal_period, adjust=False).mean()
+        df['macd'] = 2 * (df['dif'] - df['dea'])
+        # 初始值填充为0
+        df['dif'] = df['dif'].fillna(0)
+        df['dea'] = df['dea'].fillna(0)
+        df['macd'] = df['macd'].fillna(0)
+        return df
+
+    def _calculate_boll(self, df: pd.DataFrame, periods: int = 20, std_dev: float = 2.0) -> pd.DataFrame:
+        """
+        计算布林带指标
+
+        Args:
+            df: 包含close列的DataFrame
+            periods: 周期，默认20
+            std_dev: 标准差倍数，默认2
+
+        Returns:
+            添加了boll_upper, boll_middle, boll_lower列的DataFrame
+        """
+        df['boll_middle'] = df['close'].rolling(window=periods, min_periods=1).mean()
+        std = df['close'].rolling(window=periods, min_periods=1).std()
+        df['boll_upper'] = df['boll_middle'] + std_dev * std
+        df['boll_lower'] = df['boll_middle'] - std_dev * std
+        return df
+
+    def _calculate_atr(self, df: pd.DataFrame, periods: int = 14) -> pd.DataFrame:
+        """
+        计算ATR (Average True Range) 指标
+
+        Args:
+            df: 包含high, low, close列的DataFrame
+            periods: ATR周期，默认14
+
+        Returns:
+            添加了atr列的DataFrame
+        """
+        high = df['high']
+        low = df['low']
+        close = df['close']
+
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        df['atr'] = tr.rolling(window=periods, min_periods=1).mean()
+        df['atr'] = df['atr'].fillna(0)
         return df
     
     @staticmethod
