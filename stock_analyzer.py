@@ -369,11 +369,24 @@ class StockTrendAnalyzer:
         - 60 < RSI < 70: 高位，观望
         - RSI >= 70: 超买，卖出信号
         """
-        if 'rsi' not in df.columns:
-            return
+        try:
+            if 'rsi' not in df.columns:
+                logger.debug(f"{result.code}: RSI指标不存在，跳过分析")
+                return
 
-        latest_rsi = df['rsi'].iloc[-1]
-        result.rsi = float(latest_rsi) if not pd.isna(latest_rsi) else None
+            if df.empty:
+                logger.warning(f"{result.code}: 数据为空，无法分析RSI")
+                return
+
+            latest_rsi = df['rsi'].iloc[-1]
+            result.rsi = float(latest_rsi) if not pd.isna(latest_rsi) else None
+
+            if result.rsi is not None and (result.rsi < 0 or result.rsi > 100):
+                logger.warning(f"{result.code}: RSI值异常 {result.rsi}，超出范围[0,100]")
+
+        except Exception as e:
+            logger.error(f"{result.code}: RSI分析出错 - {str(e)}")
+            result.rsi = None
 
     def _analyze_macd(self, df: pd.DataFrame, result: TrendAnalysisResult) -> None:
         """
@@ -385,26 +398,37 @@ class StockTrendAnalyzer:
         - 多头（DIF>0 且 DEA>0）：趋势向上
         - 空头（DIF<0 且 DEA<0）：趋势向下
         """
-        if len(df) < 2 or 'dif' not in df.columns or 'dea' not in df.columns:
-            return
+        try:
+            if len(df) < 2 or 'dif' not in df.columns or 'dea' not in df.columns:
+                logger.debug(f"{result.code}: MACD指标数据不足，跳过分析")
+                return
 
-        # 当前和前一天的DIF、DEA
-        curr_dif = df['dif'].iloc[-1]
-        curr_dea = df['dea'].iloc[-1]
-        prev_dif = df['dif'].iloc[-2]
-        prev_dea = df['dea'].iloc[-2]
+            # 当前和前一天的DIF、DEA
+            curr_dif = df['dif'].iloc[-1]
+            curr_dea = df['dea'].iloc[-1]
+            prev_dif = df['dif'].iloc[-2]
+            prev_dea = df['dea'].iloc[-2]
 
-        # 判断金叉/死叉
-        if prev_dif <= prev_dea and curr_dif > curr_dea:
-            result.macd_signal = 'golden_cross'
-        elif prev_dif >= prev_dea and curr_dif < curr_dea:
-            result.macd_signal = 'death_cross'
-        elif curr_dif > 0 and curr_dea > 0:
-            result.macd_signal = 'bullish'
-        elif curr_dif < 0 and curr_dea < 0:
-            result.macd_signal = 'bearish'
-        else:
-            result.macd_signal = 'neutral'
+            # 检查数据有效性
+            if pd.isna(curr_dif) or pd.isna(curr_dea) or pd.isna(prev_dif) or pd.isna(prev_dea):
+                logger.debug(f"{result.code}: MACD数据包含NaN，跳过分析")
+                return
+
+            # 判断金叉/死叉
+            if prev_dif <= prev_dea and curr_dif > curr_dea:
+                result.macd_signal = 'golden_cross'
+            elif prev_dif >= prev_dea and curr_dif < curr_dea:
+                result.macd_signal = 'death_cross'
+            elif curr_dif > 0 and curr_dea > 0:
+                result.macd_signal = 'bullish'
+            elif curr_dif < 0 and curr_dea < 0:
+                result.macd_signal = 'bearish'
+            else:
+                result.macd_signal = 'neutral'
+
+        except Exception as e:
+            logger.error(f"{result.code}: MACD分析出错 - {str(e)}")
+            result.macd_signal = None
 
     def _analyze_boll(self, df: pd.DataFrame, result: TrendAnalysisResult) -> None:
         """
@@ -417,34 +441,46 @@ class StockTrendAnalyzer:
         - 价格接近上轨（上轨-5%以内）：注意压力
         - 价格触及上轨：超买，注意回调
         """
-        if len(df) < 1 or 'boll_upper' not in df.columns or 'boll_lower' not in df.columns:
-            return
+        try:
+            if len(df) < 1 or 'boll_upper' not in df.columns or 'boll_lower' not in df.columns:
+                logger.debug(f"{result.code}: 布林带指标不存在，跳过分析")
+                return
 
-        price = result.current_price
-        boll_upper = df['boll_upper'].iloc[-1]
-        boll_middle = df['boll_middle'].iloc[-1]
-        boll_lower = df['boll_lower'].iloc[-1]
+            price = result.current_price
+            boll_upper = df['boll_upper'].iloc[-1]
+            boll_middle = df['boll_middle'].iloc[-1]
+            boll_lower = df['boll_lower'].iloc[-1]
 
-        if pd.isna(boll_upper) or pd.isna(boll_lower) or boll_upper == boll_lower:
-            return
+            # 检查数据有效性
+            if pd.isna(boll_upper) or pd.isna(boll_lower) or pd.isna(boll_middle):
+                logger.debug(f"{result.code}: 布林带数据包含NaN，跳过分析")
+                return
 
-        # 计算价格在布林带中的位置百分比
-        boll_range = boll_upper - boll_lower
-        position_pct = (price - boll_lower) / boll_range if boll_range > 0 else 0.5
+            if boll_upper == boll_lower:
+                logger.debug(f"{result.code}: 布林带上下轨相等，无法分析")
+                return
 
-        # 判断位置
-        if position_pct <= 0.05:  # 触及下轨
-            result.boll_position = 'lower_touch'
-        elif position_pct <= 0.2:  # 接近下轨
-            result.boll_position = 'lower_near'
-        elif 0.4 <= position_pct <= 0.6:  # 中轨附近
-            result.boll_position = 'middle'
-        elif position_pct >= 0.95:  # 触及上轨
-            result.boll_position = 'upper_touch'
-        elif position_pct >= 0.8:  # 接近上轨
-            result.boll_position = 'upper_near'
-        else:
-            result.boll_position = 'unknown'
+            # 计算价格在布林带中的位置百分比
+            boll_range = boll_upper - boll_lower
+            position_pct = (price - boll_lower) / boll_range if boll_range > 0 else 0.5
+
+            # 判断位置
+            if position_pct <= 0.05:  # 触及下轨
+                result.boll_position = 'lower_touch'
+            elif position_pct <= 0.2:  # 接近下轨
+                result.boll_position = 'lower_near'
+            elif 0.4 <= position_pct <= 0.6:  # 中轨附近
+                result.boll_position = 'middle'
+            elif position_pct >= 0.95:  # 触及上轨
+                result.boll_position = 'upper_touch'
+            elif position_pct >= 0.8:  # 接近上轨
+                result.boll_position = 'upper_near'
+            else:
+                result.boll_position = 'unknown'
+
+        except Exception as e:
+            logger.error(f"{result.code}: 布林带分析出错 - {str(e)}")
+            result.boll_position = None
     
     def _generate_signal(self, result: TrendAnalysisResult) -> None:
         """
