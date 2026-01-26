@@ -243,9 +243,17 @@ class BaseFetcher(ABC):
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-        rs = gain / loss
+
+        # 避免除零错误：当loss为0时，rs设为无穷大，RSI=100
+        rs = gain / loss.replace(0, np.nan)
         df['rsi'] = 100 - (100 / (1 + rs))
         df['rsi'] = df['rsi'].fillna(50)  # 默认值
+
+        # 当loss为0且gain>0时，RSI应该为100
+        df.loc[loss == 0, 'rsi'] = 100
+        # 当gain为0且loss>0时，RSI应该为0
+        df.loc[gain == 0, 'rsi'] = 0
+
         return df
 
     def _calculate_macd(self, df: pd.DataFrame,
