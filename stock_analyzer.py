@@ -95,6 +95,10 @@ class TrendAnalysisResult:
     macd_signal: Optional[str] = None  # MACD信号：golden_cross/death_cross/bullish/bearish/neutral
     boll_position: Optional[str] = None  # BOLL位置：lower_touch/lower_near/middle/upper_near/upper_touch
 
+    # 风险评估（第二周新增）
+    risk_score: int = 0              # 风险评分 0-100
+    risk_level: str = "中等风险"      # 风险等级
+
     # 买入信号
     buy_signal: BuySignal = BuySignal.WAIT
     signal_score: int = 0            # 综合评分 0-120
@@ -123,6 +127,8 @@ class TrendAnalysisResult:
             'rsi': self.rsi,
             'macd_signal': self.macd_signal,
             'boll_position': self.boll_position,
+            'risk_score': self.risk_score,
+            'risk_level': self.risk_level,
             'buy_signal': self.buy_signal.value,
             'signal_score': self.signal_score,
             'signal_reasons': self.signal_reasons,
@@ -200,9 +206,12 @@ class StockTrendAnalyzer:
         self._analyze_macd(df, result)
         self._analyze_boll(df, result)
 
-        # 6. 生成买入信号
+        # 6. 风险评估（第二周新增）
+        self._assess_risk(df, result)
+
+        # 7. 生成买入信号
         self._generate_signal(result)
-        
+
         return result
     
     def _calculate_mas(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -637,7 +646,43 @@ class StockTrendAnalyzer:
             result.buy_signal = BuySignal.STRONG_SELL
         else:
             result.buy_signal = BuySignal.SELL
-    
+
+    def _assess_risk(self, df: pd.DataFrame, result: TrendAnalysisResult) -> None:
+        """
+        风险评估（第二周新增）
+
+        使用多维度风险评估系统进行综合风险分析
+
+        Args:
+            df: 股票数据
+            result: 趋势分析结果
+        """
+        try:
+            from risk_analyzer import RiskAnalyzer
+
+            risk_analyzer = RiskAnalyzer()
+            risk_assessment = risk_analyzer.assess_risk(df, result.code, result)
+
+            # 将风险评估结果添加到趋势分析结果中
+            result.risk_score = risk_assessment.total_risk_score
+            result.risk_level = risk_assessment.risk_level.value
+
+            # 合并风险警告
+            if risk_assessment.risk_warnings:
+                result.risk_factors.extend(risk_assessment.risk_warnings)
+
+            # 合并黑天鹅事件
+            if risk_assessment.black_swans:
+                result.risk_factors.extend(risk_assessment.black_swans)
+
+            logger.debug(f"{result.code}: 风险评估完成 - 风险等级{result.risk_level}")
+
+        except Exception as e:
+            logger.error(f"{result.code}: 风险评估失败 - {str(e)}")
+            # 设置默认风险等级
+            result.risk_score = 50
+            result.risk_level = "中等风险"
+
     def format_analysis(self, result: TrendAnalysisResult) -> str:
         """
         格式化分析结果为文本
