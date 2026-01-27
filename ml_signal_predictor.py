@@ -302,7 +302,8 @@ class SignalPredictionModel:
         try:
             y_proba = self.model.predict_proba(X_test)
             auc = roc_auc_score(y_test, y_proba, multi_class='ovr', average='weighted')
-        except:
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"无法计算AUC: {e}")
             auc = 0.0
 
         # 混淆矩阵

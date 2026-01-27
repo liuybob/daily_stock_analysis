@@ -298,6 +298,48 @@ class Portfolio:
         positions_value = sum(p.market_value for p in self.positions.values())
         return positions_value + self.cash
 
+    def calculate_metrics(self) -> Dict[str, Any]:
+        """
+        计算组合绩效指标（返回字典格式）
+
+        Returns:
+            包含绩效指标的字典:
+            - total_value: 总市值
+            - total_pnl: 总盈亏
+            - total_return: 总收益率
+            - win_rate: 胜率
+            - max_drawdown: 最大回撤
+            - position_count: 持仓数量
+        """
+        total_value = sum(pos.market_value for pos in self.positions.values())
+        total_cost = sum(pos.cost_basis for pos in self.positions.values() if hasattr(pos, 'cost_basis'))
+        if total_cost == 0:
+            # 如果没有 cost_basis，用 entry_price * shares 计算
+            total_cost = sum(pos.entry_price * pos.shares for pos in self.positions.values())
+
+        total_pnl = sum(pos.pnl for pos in self.positions.values())
+        total_return = (total_pnl / total_cost) if total_cost > 0 else 0
+
+        # 计算胜率
+        winning_positions = [p for p in self.positions.values() if p.pnl > 0]
+        win_rate = len(winning_positions) / len(self.positions) if self.positions else 0
+
+        # 获取更详细的指标
+        metrics = self.get_metrics()
+
+        return {
+            'total_value': total_value,
+            'total_pnl': total_pnl,
+            'total_return': total_return,
+            'win_rate': win_rate,
+            'max_drawdown': metrics.max_drawdown,
+            'sharpe_ratio': metrics.sharpe_ratio,
+            'volatility': metrics.volatility,
+            'annualized_return': metrics.annualized_return,
+            'position_count': len(self.positions),
+            'cash': self.cash,
+        }
+
     def get_metrics(self) -> PortfolioMetrics:
         """
         计算组合指标

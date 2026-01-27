@@ -77,6 +77,10 @@ class SizingConfig:
     risk_per_trade: float = 0.02         # 单笔交易风险
 
 
+# 别名，为了兼容性
+PositionSizerConfig = SizingConfig
+
+
 class PositionSizer:
     """
     仓位配置器

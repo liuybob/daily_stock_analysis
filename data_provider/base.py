@@ -465,3 +465,92 @@ class DataFetcherManager:
     def available_fetchers(self) -> List[str]:
         """返回可用数据源名称列表"""
         return [f.name for f in self._fetchers]
+
+
+class TechnicalIndicators:
+    """
+    技术指标计算类
+    
+    提供常用的技术指标计算方法：
+    - MA: 移动平均线
+    - RSI: 相对强弱指标
+    - MACD: 指数平滑移动平均线
+    - BOLL: 布林带
+    - ATR: 真实波幅
+    """
+    
+    def calculate_all(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        计算所有技术指标
+        
+        Args:
+            df: 包含OHLCV数据的DataFrame
+            
+        Returns:
+            添加了技术指标的DataFrame
+        """
+        df = df.copy()
+        
+        # MA 移动平均线
+        df['MA_5'] = df['close'].rolling(window=5).mean()
+        df['MA_10'] = df['close'].rolling(window=10).mean()
+        df['MA_20'] = df['close'].rolling(window=20).mean()
+        df['MA_60'] = df['close'].rolling(window=60).mean()
+        
+        # RSI 相对强弱指标
+        df = self._calculate_rsi(df)
+        
+        # MACD
+        df = self._calculate_macd(df)
+        
+        # BOLL 布林带
+        df = self._calculate_boll(df)
+        
+        # ATR 真实波幅
+        df = self._calculate_atr(df)
+        
+        return df
+    
+    def _calculate_rsi(self, df: pd.DataFrame, periods: int = 14) -> pd.DataFrame:
+        """计算RSI指标"""
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        df['RSI'] = df['RSI'].fillna(50)
+        return df
+    
+    def _calculate_macd(self, df: pd.DataFrame, fast: int = 12, 
+                        slow: int = 26, signal: int = 9) -> pd.DataFrame:
+        """计算MACD指标"""
+        exp1 = df['close'].ewm(span=fast, adjust=False).mean()
+        exp2 = df['close'].ewm(span=slow, adjust=False).mean()
+        df['MACD'] = exp1 - exp2
+        df['MACD_SIGNAL'] = df['MACD'].ewm(span=signal, adjust=False).mean()
+        df['MACD_HIST'] = 2 * (df['MACD'] - df['MACD_SIGNAL'])
+        return df
+    
+    def _calculate_boll(self, df: pd.DataFrame, periods: int = 20, 
+                       std_dev: float = 2.0) -> pd.DataFrame:
+        """计算布林带指标"""
+        df['BOLL_MIDDLE'] = df['close'].rolling(window=periods).mean()
+        std = df['close'].rolling(window=periods).std()
+        df['BOLL_UPPER'] = df['BOLL_MIDDLE'] + std_dev * std
+        df['BOLL_LOWER'] = df['BOLL_MIDDLE'] - std_dev * std
+        return df
+    
+    def _calculate_atr(self, df: pd.DataFrame, periods: int = 14) -> pd.DataFrame:
+        """计算ATR指标"""
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        df['ATR'] = tr.rolling(window=periods).mean()
+        df['ATR'] = df['ATR'].fillna(0)
+        return df

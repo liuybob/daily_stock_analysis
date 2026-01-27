@@ -47,6 +47,23 @@ class RiskCategory(Enum):
 
 
 @dataclass
+class RiskConfig:
+    """
+    风险分析配置
+
+    Attributes:
+        max_position_pct: 单个股票最大仓位百分比
+        stop_loss_pct: 止损百分比
+        max_drawdown_pct: 最大回撤百分比
+        volatility_window: 波动率计算窗口
+    """
+    max_position_pct: float = 0.2
+    stop_loss_pct: float = 0.08
+    max_drawdown_pct: float = 0.15
+    volatility_window: int = 20
+
+
+@dataclass
 class RiskFactor:
     """单个风险因素"""
     category: RiskCategory
@@ -124,9 +141,34 @@ class RiskAnalyzer:
     HIGH_TURNOVER_THRESHOLD = 20.0   # 高换手率阈值
     VOLATILITY_THRESHOLD = 0.05      # 5%日波动率阈值
 
-    def __init__(self):
-        """初始化风险分析器"""
-        pass
+    def __init__(self, config: Optional[RiskConfig] = None):
+        """
+        初始化风险分析器
+
+        Args:
+            config: 风险配置
+        """
+        self.config = config or RiskConfig()
+
+    def analyze_risk(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        lookback: int = 20
+    ) -> Dict[str, Any]:
+        """
+        分析股票风险（便捷方法）
+
+        Args:
+            symbol: 股票代码
+            data: 价格数据
+            lookback: 回看周期
+
+        Returns:
+            风险分析结果字典
+        """
+        result = self.assess_risk(data, symbol)
+        return result.to_dict()
 
     def assess_risk(self, df: pd.DataFrame, code: str,
                     trend_result: Optional[Any] = None) -> RiskAssessmentResult:
