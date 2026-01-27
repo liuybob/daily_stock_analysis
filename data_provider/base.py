@@ -470,45 +470,101 @@ class DataFetcherManager:
 class TechnicalIndicators:
     """
     技术指标计算类
-    
-    提供常用的技术指标计算方法：
+
+    提供主流技术指标计算方法：
+
+    趋势指标:
     - MA: 移动平均线
-    - RSI: 相对强弱指标
     - MACD: 指数平滑移动平均线
+    - DMI: 趋向指标
+    - TRIX: 三重指数平滑均线
+
+    超买超卖指标:
+    - RSI: 相对强弱指标
+    - KDJ: 随机指标
+    - WR: 威廉指标 (威廉指标)
+    - CCI: 顺势指标
+
+    能量指标:
+    - OBV: 能量潮
+    - VR: 成交量变异率
+
+    波动性指标:
     - BOLL: 布林带
     - ATR: 真实波幅
+
+    动量指标:
+    - ROC: 变动率
+    - BIAS: 乖离率
     """
-    
+
     def calculate_all(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         计算所有技术指标
-        
+
         Args:
             df: 包含OHLCV数据的DataFrame
-            
+
         Returns:
             添加了技术指标的DataFrame
         """
         df = df.copy()
-        
+
+        # ========== 趋势指标 ==========
+
         # MA 移动平均线
         df['MA_5'] = df['close'].rolling(window=5).mean()
         df['MA_10'] = df['close'].rolling(window=10).mean()
         df['MA_20'] = df['close'].rolling(window=20).mean()
         df['MA_60'] = df['close'].rolling(window=60).mean()
-        
-        # RSI 相对强弱指标
-        df = self._calculate_rsi(df)
-        
+
         # MACD
         df = self._calculate_macd(df)
-        
+
+        # DMI 趋向指标
+        df = self._calculate_dmi(df)
+
+        # TRIX 三重指数平滑均线
+        df = self._calculate_trix(df)
+
+        # ========== 超买超卖指标 ==========
+
+        # RSI 相对强弱指标
+        df = self._calculate_rsi(df)
+
+        # KDJ 随机指标
+        df = self._calculate_kdj(df)
+
+        # WR 威廉指标
+        df = self._calculate_wr(df)
+
+        # CCI 顺势指标
+        df = self._calculate_cci(df)
+
+        # ========== 能量指标 ==========
+
+        # OBV 能量潮
+        df = self._calculate_obv(df)
+
+        # VR 成交量变异率
+        df = self._calculate_vr(df)
+
+        # ========== 波动性指标 ==========
+
         # BOLL 布林带
         df = self._calculate_boll(df)
-        
+
         # ATR 真实波幅
         df = self._calculate_atr(df)
-        
+
+        # ========== 动量指标 ==========
+
+        # ROC 变动率
+        df = self._calculate_roc(df)
+
+        # BIAS 乖离率
+        df = self._calculate_bias(df)
+
         return df
     
     def _calculate_rsi(self, df: pd.DataFrame, periods: int = 14) -> pd.DataFrame:
@@ -545,12 +601,256 @@ class TechnicalIndicators:
         high = df['high']
         low = df['low']
         close = df['close']
-        
+
         tr1 = high - low
         tr2 = abs(high - close.shift())
         tr3 = abs(low - close.shift())
-        
+
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         df['ATR'] = tr.rolling(window=periods).mean()
         df['ATR'] = df['ATR'].fillna(0)
+        return df
+
+    def _calculate_kdj(self, df: pd.DataFrame, n: int = 9,
+                       m1: int = 3, m2: int = 3) -> pd.DataFrame:
+        """
+        计算KDJ随机指标
+
+        Args:
+            df: 包含OHLC数据的DataFrame
+            n: RSV周期
+            m1: K周期
+            m2: D周期
+
+        Returns:
+            添加了KDJ指标的DataFrame
+        """
+        # 计算RSV
+        low_min = df['low'].rolling(window=n).min()
+        high_max = df['high'].rolling(window=n).max()
+        rsv = (df['close'] - low_min) / (high_max - low_min) * 100
+        rsv = rsv.fillna(50)
+
+        # 计算K, D, J
+        k = rsv.ewm(alpha=m1 / n, adjust=False).mean().fillna(50)
+        d = rsv.ewm(alpha=m2 / n, adjust=False).mean().fillna(50)
+        j = 3 * k - 2 * d
+
+        # 标准化到0-100
+        df['KDJ_K'] = k.clip(0, 100)
+        df['KDJ_D'] = d.clip(0, 100)
+        df['KDJ_J'] = j.clip(0, 100)
+
+        return df
+
+    def _calculate_wr(self, df: pd.DataFrame, periods: int = 14,
+                     overbought: int = 80, oversold: int = 20) -> pd.DataFrame:
+        """
+        计算WR威廉指标
+
+        Args:
+            df: 包含OHLC数据的DataFrame
+            periods: 周期
+            overbought: 超买阈值
+            oversold: 超卖阈值
+
+        Returns:
+            添加了WR指标的DataFrame
+        """
+        high_max = df['high'].rolling(window=periods).max()
+        low_min = df['low'].rolling(window=periods).min()
+
+        if high_max.max() == low_min.max():
+            # 所有价格相同，返回50
+            df['WR'] = 50.0
+        else:
+            wr = (high_max - df['close']) / (high_max - low_min) * -100
+            df['WR'] = wr.fillna(50)
+
+        return df
+
+    def _calculate_cci(self, df: pd.DataFrame, periods: int = 20,
+                       constant: float = 0.015) -> pd.DataFrame:
+        """
+        计算CCI顺势指标
+
+        Args:
+            df: 包含OHLCV数据的DataFrame
+            periods: 周期
+            constant: 常数
+
+        Returns:
+            添加了CCI指标的DataFrame
+        """
+        tp = (df['high'] + df['low'] + df['close']) / 3
+        ma = tp.rolling(window=periods).mean()
+
+        md = (tp - ma).abs()
+        md = md.rolling(window=periods).mean().fillna(0)
+
+        df['CCI'] = (tp - ma) / (constant * md).replace(0, np.nan)
+        df['CCI'] = df['CCI'].fillna(0)
+
+        return df
+
+    def _calculate_dmi(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """
+        计算DMI趋向指标
+
+        Args:
+            df: 包含OHLCV数据的DataFrame
+            period: 周期
+
+        Returns:
+            添加了DMI指标的DataFrame
+        """
+        # 计算价格变化
+        high_diff = df['high'].diff()
+        low_diff = -df['low'].diff()
+
+        # 计算+DM和-DM
+        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0.0)
+        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0.0)
+
+        # 计算TR (True Range)
+        prev_close = df['close'].shift(1)
+        tr1 = df['high'] - df['low']
+        tr2 = (df['high'] - prev_close).abs()
+        tr3 = (df['low'] - prev_close).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        # 计算平滑的+DM, -DM和TR
+        alpha = 1.0 / period
+        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False).mean()
+        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+        tr_smooth = tr.ewm(alpha=alpha, adjust=False).mean()
+
+        # 计算+DI和-DI
+        plus_di = 100 * plus_dm_smooth / tr_smooth.replace(0, np.nan)
+        minus_di = 100 * minus_dm_smooth / tr_smooth.replace(0, np.nan)
+
+        # 计算DX和ADX
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+        df['ADX'] = dx.ewm(alpha=alpha, adjust=False).mean().fillna(0)
+
+        # 计算ADXR
+        adxr_smooth = df['ADX'].ewm(alpha=alpha, adjust=False).mean()
+        df['ADXR'] = ((df['ADX'] + adxr_smooth.shift(1)) / 2).fillna(0)
+
+        # ADX趋势判断
+        df['ADX_Trend'] = df['ADX'].apply(
+            lambda x: '强势' if x > 25 else ('盘整' if x > 20 else '弱势')
+        )
+
+        return df
+
+    def _calculate_trix(self, df: pd.DataFrame, periods: int = 12) -> pd.DataFrame:
+        """
+        计算TRIX三重指数平滑均线
+
+        Args:
+            df: 包含收盘价的DataFrame
+            periods: 周期
+
+        Returns:
+            添加了TRIX指标的DataFrame
+        """
+        # 计算三重指数平滑移动平均
+        ema1 = df['close'].ewm(span=periods, adjust=False).mean()
+        ema2 = ema1.ewm(span=periods, adjust=False).mean()
+        trix = ema2.ewm(span=periods, adjust=False).mean()
+
+        # 计算TRIX变化率
+        df['TRIX'] = (trix - trix.shift(1)) / trix.shift(1) * 100
+        df['TRIX'] = df['TRIX'].fillna(0)
+
+        return df
+
+    def _calculate_obv(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        计算OBV能量潮
+
+        Args:
+            df: 包含收盘价和成交量的DataFrame
+
+        Returns:
+            添加了OBV指标的DataFrame
+        """
+        # 计算价格变动方向
+        direction = df['close'].diff().apply(lambda x: 1 if x > 0 else -1)
+        direction = direction.fillna(0)
+
+        # 计算OBV
+        obv = (direction * df['volume']).cumsum()
+        df['OBV'] = obv
+
+        return df
+
+    def _calculate_vr(self, df: pd.DataFrame, periods: int = 26) -> pd.DataFrame:
+        """
+        计算VR成交量变异率
+
+        Args:
+            df: 包含收盘价和成交量的DataFrame
+            periods: 周期
+
+        Returns:
+            添加了VR指标的DataFrame
+        """
+        # 计算上涨日和下跌日的成交量
+        df['volume_up'] = df['volume'].where(df['close'] > df['close'].shift(1), 0)
+        df['volume_down'] = df['volume'].where(df['close'] <= df['close'].shift(1), 0)
+
+        # 计算N日平均成交量
+        vol_mean = df['volume'].rolling(window=periods).mean()
+
+        # 计算VR
+        vr_up = df['volume_up'].rolling(window=periods).sum()
+        vr_down = df['volume_down'].rolling(window=periods).sum()
+        df['VR'] = (vr_up / vr_down).replace([np.inf, -np.inf], 1).fillna(1)
+
+        # VR判断
+        df['VR_Signal'] = df['VR'].apply(
+            lambda x: '强势' if x > 450 else ('弱势' if x < 200 else '观望')
+        )
+
+        return df
+
+    def _calculate_roc(self, df: pd.DataFrame, periods: int = 12) -> pd.DataFrame:
+        """
+        计算ROC变动率
+
+        Args:
+            df: 包含收盘价的DataFrame
+            periods: 周期
+
+        Returns:
+            添加了ROC指标的DataFrame
+        """
+        df['ROC'] = df['close'].pct_change(periods) * 100
+        df['ROC'] = df['ROC'].fillna(0)
+
+        # ROC信号
+        df['ROC_Signal'] = df['ROC'].apply(
+            lambda x: '强势' if x > 5 else ('弱势' if x < -5 else '观望')
+        )
+
+        return df
+
+    def _calculate_bias(self, df: pd.DataFrame, periods: list = [6, 12, 24]) -> pd.DataFrame:
+        """
+        计算BIAS乖离率
+
+        Args:
+            df: 包含收盘价的DataFrame
+            periods: 周期列表
+
+        Returns:
+            添加了BIAS指标的DataFrame
+        """
+        for period in periods:
+            ma = df['close'].rolling(window=period).mean()
+            bias = (df['close'] - ma) / ma * 100
+            df[f'BIAS_{period}'] = bias.fillna(0)
+
         return df
