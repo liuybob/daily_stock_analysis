@@ -11,6 +11,7 @@ A股自选股智能分析系统 - 搜索服务模块
 4. 搜索结果缓存和格式化
 """
 
+import json
 import logging
 import random
 import time
